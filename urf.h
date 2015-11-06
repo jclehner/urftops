@@ -2,6 +2,9 @@
 #define URFTOPS_URF_H
 #include <stdbool.h>
 #include <stdint.h>
+#include <arpa/inet.h>
+
+#define URF_SWAP32(x) x = ntohl(x)
 
 struct urf_file_header {
 	char magic[8];
@@ -43,6 +46,7 @@ struct urf_context {
 	uint32_t page_n;
 	size_t page_line_bytes;
 	size_t page_pixel_bytes;
+	size_t page_line_n;
 	size_t page_lines;
 	char page_fill;
 	char *page_line;

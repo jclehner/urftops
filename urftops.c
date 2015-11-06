@@ -19,7 +19,7 @@ int main(int argc, char **argv)
 		}
 
 		if (*argv[2] != '-') {
-			ofd = open(argv[2], O_CREAT | O_WRONLY, 0600);
+			ofd = open(argv[2], O_CREAT | O_TRUNC | O_WRONLY, 0600);
 			if (ofd < 0) {
 				perror("open");
 				return 1;

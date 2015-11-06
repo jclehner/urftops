@@ -7,7 +7,6 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/types.h>
-#include <arpa/inet.h>
 #include "urf.h"
 
 #define log fprintf
@@ -35,7 +34,6 @@ struct urf_page_header {
 } __attribute__((packed));
 */
 
-#define BSWAP32(x) x = ntohl(x)
 
 #define DUMP_32(x) log(LOG_DBG, "%s=%" PRIu32 "\n", #x, (x))
 #define DUMP_8(x) log(LOG_DBG, "%s=%" PRIu8 "\n", #x, (x))
@@ -67,7 +65,7 @@ static bool read_file_header(struct urf_context *ctx)
 		return false;
 	}
 
-	BSWAP32(hdr->pages);
+	URF_SWAP32(hdr->pages);
 	DUMP_32(hdr->pages);
 
 	return true;
@@ -96,13 +94,13 @@ static bool read_page_header(struct urf_context *ctx)
 		return false;
 	}
 
-	BSWAP32(hdr->unknown0);
-	BSWAP32(hdr->unknown1);
-	BSWAP32(hdr->width);
-	BSWAP32(hdr->height);
-	BSWAP32(hdr->dpi);
-	BSWAP32(hdr->unknown2);
-	BSWAP32(hdr->unknown3);
+	URF_SWAP32(hdr->unknown0);
+	URF_SWAP32(hdr->unknown1);
+	URF_SWAP32(hdr->width);
+	URF_SWAP32(hdr->height);
+	URF_SWAP32(hdr->dpi);
+	URF_SWAP32(hdr->unknown2);
+	URF_SWAP32(hdr->unknown3);
 
 	DUMP_32(hdr->unknown0);
 	DUMP_32(hdr->unknown1);
@@ -119,16 +117,26 @@ static bool read_page_line(struct urf_context *ctx)
 {
 	size_t n = 0;
 	while (n < ctx->page_line_bytes) {
-		int8_t code;
+		uint8_t code;
 		if (!xread(ctx, &code, 1)) {
 			return false;
 		}
 
 		size_t ppb = ctx->page_pixel_bytes;
 
-		if (code >= 0 && code <= 127) {
+		//log(LOG_DBG, "pack: %02" PRIx8 " -> ", code);
+
+		if (code == 0x80) {
+			// fill rest of line with all-white pixels
+			size_t count = (ctx->page_line_bytes - n) * ppb;
+			//log(LOG_DBG, "blank %zu\n", count / ppb);
+			memset(ctx->page_line + n, ctx->page_fill, count);
+			n += count;
+		} else if (code <= 0x0f) {
 			// repeat next pixel (1 + code) times
+
 			if (!xread(ctx, ctx->page_line + n, ppb)) {
+				//log(LOG_DBG, "fill (err)\n");
 				return false;
 			}
 
@@ -137,25 +145,24 @@ static bool read_page_line(struct urf_context *ctx)
 			size_t repeat = 1 + (size_t) code;
 			size_t i = 0;
 
+			//log(LOG_DBG, "fill %zu\n", repeat);
+
 			for (; i != repeat; ++i) {
 				char *dest = ctx->page_line + n;
 				// copy the previous pixel to the current one
 				memcpy(dest, dest - ppb, ppb);
 				n += ppb;
 			}
-		} else if (code >= -127 && code < 0) {
-			// copy next (-code + 1) pixels
-			size_t count = ((size_t)-code + 1) * ppb;
+		} else {
+			// copy next (257 - code) pixels
+			size_t count = (257 - (size_t)code) * ppb;
+			//log(LOG_DBG, "copy %zu\n", count / ppb);
 			if (!xread(ctx, ctx->page_line + n, count)) {
 				return false;
 			}
-		} else {
-			// fill rest of line with all-white pixels
-			size_t count = (ctx->page_line_bytes - n) * ppb;
-			log(LOG_DBG, "fill: count=%zu\n", count);
-			memset(ctx->page_line + n, ctx->page_fill, count);
+
 			n += count;
-		} 
+		}
 	}
 
 	return true;
@@ -167,7 +174,7 @@ static bool op_call(bool (*func)(struct urf_context *), const char *id,
 	if (func) {
 		ctx->error->code = 0;
 		if (!func(ctx)) {
-			log(LOG_ERR, "%16s: %s: ", id, name);
+			log(LOG_ERR, "%s: %s: ", id, name);
 
 			if (ctx->error->code > 0) {
 				log(LOG_ERR, "%s\n", strerror(ctx->error->code));
@@ -254,21 +261,27 @@ int urf_convert(int ifd, int ofd, struct urf_conv_ops *ops, void *arg)
 			goto bailout_page_end;
 		}
 
-		size_t line = 0;
-		while (line < ctx.page_lines) {
+		ctx.page_line_n = 0;
+
+		while (ctx.page_line_n < ctx.page_lines) {
 			uint8_t repeat;
 			if (!xread(&ctx, &repeat, 1)) {
 				break;
 			}
 
-			do {
-				if (!read_page_line(&ctx)) {
-					goto bailout_rast_end;
-				}
+			//log(LOG_DBG, "line %zu repeat %" PRIu8 "\n", line, repeat);
 
+			if (!read_page_line(&ctx)) {
+				goto bailout_rast_end;
+			}
+
+			do {
 				if (!OP_CALL(rast_line)) {
 					goto bailout_rast_end;
 				}
+
+				++ctx.page_line_n;
+
 			} while (repeat--);
 		}
 
