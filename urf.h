@@ -46,10 +46,11 @@ struct urf_context {
 	uint32_t page_n;
 	size_t page_line_bytes;
 	size_t page_pixel_bytes;
-	size_t page_line_n;
-	size_t page_lines;
 	char page_fill;
-	char *page_line;
+	size_t lines;
+	uint8_t line_repeat;
+	size_t line_n;
+	char *line_data;
 	void *impl;
 };
 

@@ -2,7 +2,14 @@
 #include <fcntl.h>
 #include "urf.h"
 
-extern struct urf_conv_ops urf_postscript_ops;
+#ifndef URF_CONV
+#error "URF_CONV not defined"
+#endif
+
+#define OPS_NAME_1(name) urf_ ## name ## _ops
+#define OPS_NAME(name) OPS_NAME_1(name)
+
+extern struct urf_conv_ops OPS_NAME(URF_CONV);
 
 int main(int argc, char **argv)
 {
@@ -27,5 +34,5 @@ int main(int argc, char **argv)
 		}
 	}
 
-	return urf_convert(ifd, ofd, &urf_postscript_ops, NULL);
+	return urf_convert(ifd, ofd, &OPS_NAME(URF_CONV), NULL);
 }

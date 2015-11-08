@@ -2,8 +2,7 @@ CC=cc
 CFLAGS=-Wextra -g
 LDFLAGS=
 
-all: urf.o conv_ps.o urftops.o
-	$(CC) $(LDFLAGS) urf.o conv_ps.o urftops.o -o urftops
+all: urftops urftobmp
 
 clean:
 	rm -f *.o
@@ -14,6 +13,12 @@ urf.o: urf.c urf.h
 conv_ps.o: conv_ps.c urf.h
 	$(CC) -c $(CFLAGS) -o conv_ps.o conv_ps.c
 
-urftops.o: urftops.c
-	$(CC) -c $(CFLAGS) -o urftops.o urftops.c
+conv_bmp.o: conv_bmp.c urf.h
+	$(CC) -c $(CFLAGS) -o conv_bmp.o conv_bmp.c
+
+urftops: urf.o urftox.c conv_ps.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -DURF_CONV=postscript -o urftops urftox.c conv_ps.o urf.o
+
+urftobmp: urf.o urftox.c conv_bmp.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -DURF_CONV=bmp -o urftobmp urftox.c conv_bmp.o urf.o
 

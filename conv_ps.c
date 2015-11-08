@@ -68,16 +68,12 @@ static bool page_begin(struct urf_context *ctx)
 	fprintf(stderr, "page %" PRIu32 "/ %" PRIu32 "\n", ctx->page_n, ctx->file_hdr->pages);
 
 	return xprintf(ctx, "%%%%Page: %u %u\n", ctx->page_n, ctx->page_n);
-
-	return xprintf(ctx, "%%%%Page: %u %u\n", ctx->page_n, ctx->page_n);
 }
 
 static bool rast_begin(struct urf_context *ctx)
 {
 	unsigned w = ctx->page_hdr->width;
 	unsigned h = ctx->page_hdr->height;
-
-	return true;
 
 	return xprintf(ctx, 
 			"1 1 scale\n"
@@ -90,6 +86,7 @@ static bool rast_begin(struct urf_context *ctx)
 			"  pop\n"
 			"}\n"
 			"false\n"
+			"3\n"
 			"colorimage\n",
 			ctx->page_n, w, h,
 			w, h,
@@ -100,23 +97,26 @@ static bool rast_begin(struct urf_context *ctx)
 
 static bool rast_line(struct urf_context *ctx)
 {
-	size_t i = 0;
+	size_t i, k;
 
-	for (; i != ctx->page_line_bytes; i += ctx->page_pixel_bytes) {
-		int r = ctx->page_line[i] & 0xff;
-		int g = ctx->page_line[i + 1] & 0xff;
-		int b = ctx->page_line[i + 2] & 0xff;
+	for (i = 0; i != ctx->line_repeat; ++i) {
+		for (k = 0; k != ctx->page_line_bytes; k += ctx->page_pixel_bytes) {
+			int r = ctx->line_data[k] & 0xff;
+			int g = ctx->line_data[k + 1] & 0xff;
+			int b = ctx->line_data[k + 2] & 0xff;
 
-		if (i && i % (ctx->page_pixel_bytes * 10) == 0) {
-			xprintf(ctx, "\n");
+			if (k && k % (ctx->page_pixel_bytes * 10) == 0) {
+				xprintf(ctx, "\n");
+			}
+
+			if (!xprintf(ctx, "%02x%02x%02x", r, g, b)) {
+				return false;
+			}
 		}
-
-		if (!xprintf(ctx, "%02x%02x%02x", r, g, b)) {
-			return false;
-		}
+		++ctx->line_n;
 	}
 
-	xprintf(ctx, "\n\n");
+	xprintf(ctx, "\n");
 
 	return true;
 }
@@ -128,7 +128,6 @@ static bool rast_end(struct urf_context *ctx)
 
 static bool page_end(struct urf_context *ctx)
 {
-	return true;
 	return xprintf(ctx, "showpage\n");
 }
 

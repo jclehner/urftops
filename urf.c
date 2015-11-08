@@ -34,9 +34,6 @@ struct urf_page_header {
 } __attribute__((packed));
 */
 
-#define URF_DEBUG
-
-
 #define DUMP_32(x) log(LOG_DBG, "%s=%" PRIu32 "\n", #x, (x))
 #define DUMP_8(x) log(LOG_DBG, "%s=%" PRIu8 "\n", #x, (x))
 
@@ -357,6 +354,9 @@ bailout_context_cleanup:
 	OP_CALL_NO_ERR(context_cleanup);
 bailout:
 	;
+
+#undef OP_CALL
+#undef OP_CALL_NO_ERR
 
 	struct urf_error *last_error = saved_error.code ?
 			&saved_error : &error;
