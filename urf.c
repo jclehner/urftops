@@ -34,6 +34,8 @@ struct urf_page_header {
 } __attribute__((packed));
 */
 
+#define URF_DEBUG
+
 
 #define DUMP_32(x) log(LOG_DBG, "%s=%" PRIu32 "\n", #x, (x))
 #define DUMP_8(x) log(LOG_DBG, "%s=%" PRIu8 "\n", #x, (x))
@@ -116,53 +118,93 @@ static bool read_page_header(struct urf_context *ctx)
 static bool read_page_line(struct urf_context *ctx)
 {
 	size_t n = 0;
+
+#ifdef URF_DEBUG
+	fprintf(stderr, ">> line %zu", ctx->line_n - 1);
+	if (ctx->line_repeat) {
+		fprintf(stderr, " - %zu", ctx->line_n + ctx->line_repeat - 1);
+	}
+	fprintf(stderr, "\n");	
+#endif
+
 	while (n < ctx->page_line_bytes) {
 		uint8_t code;
 		if (!xread(ctx, &code, 1)) {
 			return false;
 		}
 
-		size_t ppb = ctx->page_pixel_bytes;
+#ifdef URF_DEBUG
+		fprintf(stderr, "  % 5zu |", n / 3);
+#endif
 
-		//log(LOG_DBG, "pack: %02" PRIx8 " -> ", code);
+		size_t ppb = ctx->page_pixel_bytes;
 
 		if (code == 0x80) {
 			// fill rest of line with all-white pixels
-			size_t count = (ctx->page_line_bytes - n) * ppb;
-			//log(LOG_DBG, "blank %zu\n", count / ppb);
-			memset(ctx->page_line + n, ctx->page_fill, count);
-			n += count;
-		} else if (code <= 0x0f) {
+			size_t bytes = ctx->page_line_bytes - n;
+			memset(ctx->line_data + n, ctx->page_fill, bytes);
+			n += bytes;
+#ifdef URF_DEBUG
+			fprintf(stderr, "  %1$ 5zu <%2$02x %2$02x %2$02x>\n", bytes / ppb, ctx->page_fill & 0xff);
+#endif
+		} else if (code <= 0x7f) {
 			// repeat next pixel (1 + code) times
-
-			if (!xread(ctx, ctx->page_line + n, ppb)) {
+			if (!xread(ctx, ctx->line_data + n, ppb)) {
 				//log(LOG_DBG, "fill (err)\n");
 				return false;
 			}
 
-			n += ppb;
+			size_t count = 1 + (size_t) code;
+			size_t i;
+			
+#ifdef URF_DEBUG
+			
+			fprintf(stderr, "  % 5zu <", count);
+			for (i = 0; i != ppb; ++i) {
+				fprintf(stderr, "%s%02x", i ? " " : "", 
+						ctx->line_data[n + i] & 0xff);
+			}
+			fprintf(stderr, ">\n");
+#endif
 
-			size_t repeat = 1 + (size_t) code;
-			size_t i = 0;
-
-			//log(LOG_DBG, "fill %zu\n", repeat);
-
-			for (; i != repeat; ++i) {
-				char *dest = ctx->page_line + n;
+			for (i = 0; i != count; ++i) {
+				char *dest = ctx->line_data + n + ppb;
 				// copy the previous pixel to the current one
 				memcpy(dest, dest - ppb, ppb);
 				n += ppb;
 			}
 		} else {
 			// copy next (257 - code) pixels
-			size_t count = (257 - (size_t)code) * ppb;
-			//log(LOG_DBG, "copy %zu\n", count / ppb);
-			if (!xread(ctx, ctx->page_line + n, count)) {
+			size_t count = (257 - (size_t)code);
+			if (!xread(ctx, ctx->line_data + n, count * ppb)) {
 				return false;
 			}
 
 			n += count;
+
+#ifdef URF_DEBUG
+			fprintf(stderr, "       <");
+			size_t i, k;
+			for (i = 0; i != count; ++i) {
+				fprintf(stderr, "<");
+				for (k = 0; k != ppb; ++k) {
+					fprintf(stderr, "%s%02x", k ? " " : "",
+							ctx->line_data[i * ppb + k] & 0xff);
+				}
+				fprintf(stderr, ">");
+			}
+			fprintf(stderr, ">\n");
+#endif
 		}
+	}
+
+#ifdef URF_DEBUG
+	fprintf(stderr, "\n");
+#endif
+
+	if (n != ctx->page_line_bytes) {
+		log(LOG_ERR, "n (%zu) >= page_line_bytes (%zu)\n", n, ctx->page_line_bytes);
+		return false;
 	}
 
 	return true;
@@ -209,7 +251,7 @@ int urf_convert(int ifd, int ofd, struct urf_conv_ops *ops, void *arg)
 	ctx.ifd = ifd;
 	ctx.ofd = ofd;
 	ctx.error = &error;
-	ctx.page_line = NULL;
+	ctx.line_data = NULL;
 	ctx.page_fill = 0xff;
 	ctx.file_hdr = &file_hdr;
 	ctx.page1_hdr = &page1_hdr;
@@ -223,18 +265,16 @@ int urf_convert(int ifd, int ofd, struct urf_conv_ops *ops, void *arg)
 		goto bailout;
 	}
 
-	fprintf(stderr, "** 3\n");
-
 	memcpy(&page1_hdr, &page_hdr, sizeof(struct urf_page_header));
 
 	ctx.page_pixel_bytes = page1_hdr.bpp / 8;
 	ctx.page_line_bytes = ctx.page_pixel_bytes * page1_hdr.width;
-	ctx.page_lines = page1_hdr.height;
+	ctx.lines = page1_hdr.height;
 
 	ctx.page_n = 1;
 
-	ctx.page_line = malloc(ctx.page_line_bytes);
-	if (!ctx.page_line) {
+	ctx.line_data = malloc(ctx.page_line_bytes);
+	if (!ctx.line_data) {
 		URF_SET_ERRNO(&ctx, "malloc");
 		goto bailout;
 	}
@@ -261,15 +301,12 @@ int urf_convert(int ifd, int ofd, struct urf_conv_ops *ops, void *arg)
 			goto bailout_page_end;
 		}
 
-		ctx.page_line_n = 0;
+		ctx.line_n = 1;
 
-		while (ctx.page_line_n < ctx.page_lines) {
-			uint8_t repeat;
-			if (!xread(&ctx, &repeat, 1)) {
+		while (ctx.line_n <= ctx.lines) {
+			if (!xread(&ctx, &ctx.line_repeat, 1)) {
 				break;
 			}
-
-			//log(LOG_DBG, "line %zu repeat %" PRIu8 "\n", line, repeat);
 
 			if (!read_page_line(&ctx)) {
 				goto bailout_rast_end;
@@ -280,9 +317,8 @@ int urf_convert(int ifd, int ofd, struct urf_conv_ops *ops, void *arg)
 					goto bailout_rast_end;
 				}
 
-				++ctx.page_line_n;
-
-			} while (repeat--);
+				++ctx.line_n;
+			} while (ctx.line_repeat--);
 		}
 
 		if (!OP_CALL(rast_end)) {
