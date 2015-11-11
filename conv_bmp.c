@@ -89,26 +89,30 @@ static bool rast_begin(struct urf_context *ctx)
 	return true;
 }
 
-static bool rast_line(struct urf_context *ctx)
+static bool rast_lines(struct urf_context *ctx)
 {
 	uint8_t *brg = (uint8_t *)ctx->impl;
 	uint8_t *rgb = (uint8_t *)ctx->line_data;
 
-	size_t i = 0;
-	for (; i != ctx->page_hdr->width; ++i) {
-		size_t offset = i * ctx->page_pixel_bytes;
+	do {
+		size_t i = 0;
+		for (; i != ctx->page_hdr->width; ++i) {
+			size_t offset = i * ctx->page_pixel_bytes;
 
-		brg[offset + 0] = rgb[offset + 2];
-		brg[offset + 1] = rgb[offset + 1];
-		brg[offset + 2] = rgb[offset + 0];
-	}
+			brg[offset + 0] = rgb[offset + 2];
+			brg[offset + 1] = rgb[offset + 1];
+			brg[offset + 2] = rgb[offset + 0];
+		}
 
-	memset(brg + ctx->page_line_bytes, 0x00, i % 4);
-	
-	if (write(ctx->ofd, brg, ctx->page_line_bytes + i % 4) < 0) {
-		URF_SET_ERRNO(ctx, "write");
-		return false;
-	}
+		memset(brg + ctx->page_line_bytes, 0x00, i % 4);
+		
+		if (write(ctx->ofd, brg, ctx->page_line_bytes + i % 4) < 0) {
+			URF_SET_ERRNO(ctx, "write");
+			return false;
+		}
+
+		++ctx->line_n;
+	} while (ctx->line_repeat--);
 
 	return true;
 }
@@ -116,7 +120,7 @@ static bool rast_line(struct urf_context *ctx)
 struct urf_conv_ops urf_bmp_ops = {
 	.doc_begin = &doc_begin,
 	.rast_begin = &rast_begin,
-	.rast_line = &rast_line,
+	.rast_lines = &rast_lines,
 	.context_cleanup = &context_cleanup,
 	.id = "bmp"
 };

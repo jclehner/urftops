@@ -13,29 +13,7 @@
 #define LOG_ERR stderr
 #define LOG_DBG stderr
 
-/*
-struct urf_file_header {
-	char magic[8];
-	uint32_t pages;
-} __attribute__((packed));
-
-struct urf_page_header {
-	uint8_t bpp;
-	uint8_t colorspace;
-	uint8_t duplex;
-	uint8_t quality;
-	uint32_t unknown0;
-	uint32_t unknown1;
-	uint32_t width;
-	uint32_t height;
-	uint32_t dpi;
-	uint32_t unknown2;
-	uint32_t unknown3;
-} __attribute__((packed));
-*/
-
-#define DUMP_32(x) log(LOG_DBG, "%s=%" PRIu32 "\n", #x, (x))
-#define DUMP_8(x) log(LOG_DBG, "%s=%" PRIu8 "\n", #x, (x))
+#define SWAP32(x) x = ntohl(x)
 
 static bool xread(struct urf_context *ctx, void *buffer, size_t size)
 {
@@ -64,8 +42,7 @@ static bool read_file_header(struct urf_context *ctx)
 		return false;
 	}
 
-	URF_SWAP32(hdr->pages);
-	DUMP_32(hdr->pages);
+	SWAP32(hdr->pages);
 
 	return true;
 }
@@ -78,43 +55,37 @@ static bool read_page_header(struct urf_context *ctx)
 
 	struct urf_page_header *hdr = ctx->page_hdr;
 
-	DUMP_8(hdr->bpp);
-	DUMP_8(hdr->colorspace);
-	DUMP_8(hdr->duplex);
-	DUMP_8(hdr->quality);
-
 	if (!hdr->bpp || hdr->bpp > 32 || hdr->bpp % 8) {
-		URF_SET_ERROR(ctx, "invalid bpp", -1);
+		URF_SET_ERROR(ctx, "invalid bpp", -hdr->bpp);
 		return false;
 	}
 
 	if (hdr->bpp != 24) {
-		URF_SET_ERROR(ctx, "bpp != 24", -1);
+		URF_SET_ERROR(ctx, "unsupported bpp", -hdr->bpp);
 		return false;
 	}
 
-	URF_SWAP32(hdr->unknown0);
-	URF_SWAP32(hdr->unknown1);
-	URF_SWAP32(hdr->width);
-	URF_SWAP32(hdr->height);
-	URF_SWAP32(hdr->dpi);
-	URF_SWAP32(hdr->unknown2);
-	URF_SWAP32(hdr->unknown3);
+	if (hdr->colorspace != 1) {
+		URF_SET_ERROR(ctx, "unsupported colorspace", -hdr->colorspace);
+		return false;
+	}
 
-	DUMP_32(hdr->unknown0);
-	DUMP_32(hdr->unknown1);
-	DUMP_32(hdr->width);
-	DUMP_32(hdr->height);
-	DUMP_32(hdr->dpi);
-	DUMP_32(hdr->unknown2);
-	DUMP_32(hdr->unknown3);
+	SWAP32(hdr->unknown0);
+	SWAP32(hdr->unknown1);
+	SWAP32(hdr->width);
+	SWAP32(hdr->height);
+	SWAP32(hdr->dpi);
+	SWAP32(hdr->unknown2);
+	SWAP32(hdr->unknown3);
 
 	return true;
 }
 
-static bool read_page_line(struct urf_context *ctx)
+static bool read_page_line(struct urf_context *ctx, bool raw)
 {
-	size_t n = 0;
+	size_t n = 0, k = 0;
+
+	ctx->line_raw_bytes = 0;
 
 #ifdef URF_DEBUG
 	fprintf(stderr, ">> line %zu", ctx->line_n - 1);
@@ -130,28 +101,35 @@ static bool read_page_line(struct urf_context *ctx)
 			return false;
 		}
 
+		if (raw) {
+			ctx->line_data[ctx->line_raw_bytes++] = code;
+		}
+
 #ifdef URF_DEBUG
 		fprintf(stderr, "  % 5zu |", n / 3);
 #endif
-
 		size_t ppb = ctx->page_pixel_bytes;
 
 		if (code == 0x80) {
 			// fill rest of line with all-white pixels
 			size_t bytes = ctx->page_line_bytes - n;
-			memset(ctx->line_data + n, ctx->page_fill, bytes);
+			if (!raw) {
+				memset(ctx->line_data + n, ctx->page_fill, bytes);
+			}
 			n += bytes;
 #ifdef URF_DEBUG
 			fprintf(stderr, "  %1$ 5zu <%2$02x %2$02x %2$02x>\n", bytes / ppb, ctx->page_fill & 0xff);
 #endif
 		} else if (code <= 0x7f) {
+			char *pixel = ctx->line_data + (!raw ? n : ctx->line_raw_bytes);
+
 			// repeat next pixel (1 + code) times
-			if (!xread(ctx, ctx->line_data + n, ppb)) {
+			if (!xread(ctx, pixel, ppb)) {
 				//log(LOG_DBG, "fill (err)\n");
 				return false;
 			}
 
-			size_t count = 1 + (size_t) code;
+			size_t count = 1 + (size_t)code;
 			size_t i;
 			
 #ifdef URF_DEBUG
@@ -164,23 +142,33 @@ static bool read_page_line(struct urf_context *ctx)
 			fprintf(stderr, ">\n");
 #endif
 
-			for (i = 0; i != count; ++i) {
-				char *dest = ctx->line_data + n + ppb;
-				// copy the previous pixel to the current one
-				memcpy(dest, dest - ppb, ppb);
-				n += ppb;
+			if (!raw) {
+				for (i = 0; i != count; ++i) {
+					char *dest = ctx->line_data + n + ppb;
+					// copy the previous pixel to the current one
+					memcpy(dest, dest - ppb, ppb);
+					n += ppb;
+				}
+			} else {
+				ctx->line_raw_bytes += ppb;
+				n += count * ppb;
 			}
 		} else {
+			char *pixels = ctx->line_data + (!raw ? n : ctx->line_raw_bytes);
 			// copy next (257 - code) pixels
 			size_t count = (257 - (size_t)code);
-			if (!xread(ctx, ctx->line_data + n, count * ppb)) {
+			if (!xread(ctx, pixels, count * ppb)) {
 				return false;
 			}
 
-			n += count;
+			n += count * ppb;
+
+			if (raw) {
+				ctx->line_raw_bytes += ppb * count;
+			}
 
 #ifdef URF_DEBUG
-			fprintf(stderr, "       <");
+			fprintf(stderr, "        ");
 			size_t i, k;
 			for (i = 0; i != count; ++i) {
 				fprintf(stderr, "<");
@@ -188,9 +176,9 @@ static bool read_page_line(struct urf_context *ctx)
 					fprintf(stderr, "%s%02x", k ? " " : "",
 							ctx->line_data[i * ppb + k] & 0xff);
 				}
-				fprintf(stderr, ">");
+				fprintf(stderr, "> ");
 			}
-			fprintf(stderr, ">\n");
+			fprintf(stderr, "\n");
 #endif
 		}
 	}
@@ -266,7 +254,6 @@ int urf_convert(int ifd, int ofd, struct urf_conv_ops *ops, void *arg)
 
 	ctx.page_pixel_bytes = page1_hdr.bpp / 8;
 	ctx.page_line_bytes = ctx.page_pixel_bytes * page1_hdr.width;
-	ctx.lines = page1_hdr.height;
 
 	ctx.page_n = 1;
 
@@ -300,22 +287,24 @@ int urf_convert(int ifd, int ofd, struct urf_conv_ops *ops, void *arg)
 
 		ctx.line_n = 1;
 
-		while (ctx.line_n <= ctx.lines) {
+		while (ctx.line_n <= ctx.page_hdr->height) {
 			if (!xread(&ctx, &ctx.line_repeat, 1)) {
 				break;
 			}
 
-			if (!read_page_line(&ctx)) {
+			if (!read_page_line(&ctx, ops->rast_lines_raw)) {
 				goto bailout_rast_end;
 			}
 
-			do {
-				if (!OP_CALL(rast_line)) {
-					goto bailout_rast_end;
-				}
+			size_t expect = ctx.line_n + 1 + (size_t)ctx.line_repeat;
 
-				++ctx.line_n;
-			} while (ctx.line_repeat--);
+			if (!OP_CALL(rast_lines_raw)) {
+				goto bailout_rast_end;
+			}
+
+			if (!OP_CALL(rast_lines)) {
+				goto bailout_rast_end;
+			}
 		}
 
 		if (!OP_CALL(rast_end)) {
@@ -326,20 +315,18 @@ int urf_convert(int ifd, int ofd, struct urf_conv_ops *ops, void *arg)
 			goto bailout_doc_end;
 		}
 
-		if (++ctx.page_n == file_hdr.pages) {
+		if (++ctx.page_n > file_hdr.pages) {
 			break;
 		}
 
 	} while (read_page_header(&ctx));
 
-	if (ctx.page_n == file_hdr.pages) {
-		if (!OP_CALL(doc_end)) {
-			goto bailout_context_cleanup;
-		}
+	if (!OP_CALL(doc_end)) {
+		goto bailout_context_cleanup;
+	}
 
-		if (OP_CALL(context_cleanup)) {
-			return 0;
-		}
+	if (OP_CALL(context_cleanup)) {
+		return 0;
 	}
 
 	goto bailout;

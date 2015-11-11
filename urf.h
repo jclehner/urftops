@@ -4,8 +4,6 @@
 #include <stdint.h>
 #include <arpa/inet.h>
 
-#define URF_SWAP32(x) x = ntohl(x)
-
 struct urf_file_header {
 	char magic[8];
 	uint32_t pages;
@@ -37,20 +35,35 @@ struct urf_error {
 };
 
 struct urf_context {
+	/** input file descriptor */
 	int ifd;
+	/** output file descriptor */
 	int ofd;
+	/** error info */
 	struct urf_error *error;
+	/** URF file header */
 	struct urf_file_header *file_hdr;
+	/** URF page header of first page */
 	struct urf_page_header *page1_hdr;
+	/** URF page header of current page */
 	struct urf_page_header *page_hdr;
+	/** current page number (starting at 1) */
 	uint32_t page_n;
+	/** bytes per line on current page */
 	size_t page_line_bytes;
+	/** bytes per pixel on current page */
 	size_t page_pixel_bytes;
+	/** fill character for the blank opcode */
 	char page_fill;
-	size_t lines;
+	/** number of times the current line should be repeated */
 	uint8_t line_repeat;
+	/** current line number (starting at 0) */
 	size_t line_n;
+	/** line data */
 	char *line_data;
+	/** number of raw bytes in current line */
+	size_t line_raw_bytes;
+	/** for private use by converters */
 	void *impl;
 };
 
@@ -60,7 +73,8 @@ struct urf_conv_ops {
 	bool (*doc_begin)(struct urf_context *);
 	bool (*page_begin)(struct urf_context *);
 	bool (*rast_begin)(struct urf_context *);
-	bool (*rast_line)(struct urf_context *);
+	bool (*rast_lines)(struct urf_context *);
+	bool (*rast_lines_raw)(struct urf_context *);
 	bool (*rast_end)(struct urf_context *);
 	bool (*page_end)(struct urf_context *);
 	bool (*doc_end)(struct urf_context *);
