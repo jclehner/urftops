@@ -34,7 +34,7 @@ static bool doc_begin(struct urf_context *ctx)
 	uint32_t h, w;
 
 	h = ctx->page1_hdr->height;
-	w  = ctx->page1_hdr->width;
+	w = ctx->page1_hdr->width;
 
 	size_t plb = ctx->page_line_bytes;
 
@@ -66,14 +66,12 @@ static bool doc_begin(struct urf_context *ctx)
 	return true;
 }
 
-static bool context_cleanup(struct urf_context *ctx)
+static void context_cleanup(struct urf_context *ctx)
 {
 	/*if (ctx->impl) {
 		(void) realloc(ctx->impl, 0);
 		ctx->impl = NULL;
 	}*/
-
-	return true;
 }
 
 static bool rast_begin(struct urf_context *ctx)
@@ -105,7 +103,7 @@ static bool rast_lines(struct urf_context *ctx)
 		}
 
 		memset(brg + ctx->page_line_bytes, 0x00, i % 4);
-		
+
 		if (write(ctx->ofd, brg, ctx->page_line_bytes + i % 4) < 0) {
 			URF_SET_ERRNO(ctx, "write");
 			return false;
