@@ -1,3 +1,4 @@
+#include <time.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <string.h>
@@ -200,6 +201,7 @@ static bool op_call(bool (*func)(struct urf_context *), const char *id,
 {
 	if (func) {
 		ctx->error->code = 0;
+
 		if (!func(ctx)) {
 			log(LOG_ERR, "%s: %s: ", id, name);
 
@@ -212,7 +214,7 @@ static bool op_call(bool (*func)(struct urf_context *), const char *id,
 			if (error) {
 				memcpy(error, ctx->error, sizeof(struct urf_error));
 			}
-			
+
 			return false;
 		}
 	}
@@ -225,7 +227,7 @@ static void cleanup(struct urf_context *ctx, struct urf_conv_ops *ops)
 	if (ops->context_cleanup) {
 		ops->context_cleanup(ctx);
 	}
-	
+
 	ctx->impl = NULL;
 	free(ctx->line_data);
 	ctx->line_data = NULL;

@@ -75,6 +75,7 @@ struct urf_conv_ops {
 	bool (*rast_begin)(struct urf_context *);
 	bool (*rast_lines)(struct urf_context *);
 	bool (*rast_lines_raw)(struct urf_context *);
+	bool (*rast_rle_blob)(struct urf_context *, size_t, char *, size_t);
 	bool (*rast_end)(struct urf_context *);
 	bool (*page_end)(struct urf_context *);
 	bool (*doc_end)(struct urf_context *);
