@@ -220,6 +220,17 @@ static bool op_call(bool (*func)(struct urf_context *), const char *id,
 	return true;
 }
 
+static void cleanup(struct urf_context *ctx, struct urf_conv_ops *ops)
+{
+	if (ops->context_cleanup) {
+		ops->context_cleanup(ctx);
+	}
+	
+	ctx->impl = NULL;
+	free(ctx->line_data);
+	ctx->line_data = NULL;
+}
+
 int urf_convert(int ifd, int ofd, struct urf_conv_ops *ops, void *arg)
 {
 	struct urf_context ctx;
@@ -296,8 +307,6 @@ int urf_convert(int ifd, int ofd, struct urf_conv_ops *ops, void *arg)
 				goto bailout_rast_end;
 			}
 
-			size_t expect = ctx.line_n + 1 + (size_t)ctx.line_repeat;
-
 			if (!OP_CALL(rast_lines_raw)) {
 				goto bailout_rast_end;
 			}
@@ -325,11 +334,8 @@ int urf_convert(int ifd, int ofd, struct urf_conv_ops *ops, void *arg)
 		goto bailout_context_cleanup;
 	}
 
-	if (OP_CALL(context_cleanup)) {
-		return 0;
-	}
-
-	goto bailout;
+	cleanup(&ctx, ops);
+	return 0;
 
 bailout_rast_end:
 	OP_CALL_NO_ERR(rast_end);
@@ -338,9 +344,9 @@ bailout_page_end:
 bailout_doc_end:
 	OP_CALL_NO_ERR(doc_end);
 bailout_context_cleanup:
-	OP_CALL_NO_ERR(context_cleanup);
+	cleanup(&ctx, ops);
 bailout:
-	;
+	free(ctx.line_data);
 
 #undef OP_CALL
 #undef OP_CALL_NO_ERR

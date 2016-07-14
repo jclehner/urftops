@@ -69,7 +69,7 @@ struct urf_context {
 
 struct urf_conv_ops {
 	bool (*context_setup)(struct urf_context *, void *);
-	bool (*context_cleanup)(struct urf_context *);
+	void (*context_cleanup)(struct urf_context *);
 	bool (*doc_begin)(struct urf_context *);
 	bool (*page_begin)(struct urf_context *);
 	bool (*rast_begin)(struct urf_context *);
